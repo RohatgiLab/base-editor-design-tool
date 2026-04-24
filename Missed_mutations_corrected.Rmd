@@ -1,0 +1,192 @@
+---
+author: "Murugesh Narayanappa"
+date: "2026-04-24"
+output: html_document
+---
+
+<h1 style="text-align:center; font-size:24px; color:blue;">
+Missed Mutation Correction
+</h1>
+
+<p style="text-align:center; font-size:18px; color:blue;">
+Murugesh Narayanappa: 2026-04-24
+</p>
+
+##### Appending Missed Mutations from the Base Editor Design Tool
+- Purpose:
+   Identify and append these missed dual-edit mutations and their categories
+  to the output dataframe.
+- Background: The tool predicts amino acid changes by evaluating one nucleotide at   a time.However, when a codon contains "AA" or "CC" in the first two positions
+  (before the wobble base), in either strand orientation (5'→3' or 3'→5') the base   editor is likely to edit both nucleotides simultaneously:
+     - Adenine Base Editor (ABE): AA → GG
+     - Cytosine Base Editor (CBE): CC → TT
+
+  Since the tool only evaluates single-nucleotide edits, it does not predict
+  the amino acid outcomes resulting from these probable dual-edit events by
+  the base editor.
+ 
+
+```{r echo = TRUE, comment = FALSE, message=FALSE, warning=FALSE}
+# loading required libraries
+library(stringr)
+library(data.table)
+library(janitor)
+library(readxl)
+library(openxlsx)
+library(dplyr)
+library(purrr)
+library(gt)
+
+```
+
+- Functions for appending both ABE and CBE base editor missed mutations: 
+
+```{r echo = TRUE, comment = FALSE, message = FALSE, warning = FALSE }
+# ABE missed mutations: 
+abe_missed_mutations <- function(mutations, categories, gRNA) {
+  
+  # getting positions
+  get_positions <- function(mutations, pattern) {
+    matches <- str_extract_all(mutations, pattern)[[1]]
+    as.integer(str_extract(matches, "\\d+"))
+  }
+  
+ # adding mutations and categories for extracted positions
+  add_mutations <- function(mutations, categories, shared_pos, prefix, suffix, cat_entry) {
+    for (position in shared_pos) {
+      mutations  <- str_c(mutations, prefix, position, suffix, ";")
+      categories <- str_c(categories, cat_entry, ";")
+    }
+    return(list(mutations = mutations, categories = categories))
+  }
+  
+  # Check for Lys\\d+Glu and Lys\\d+Arg (\\d+ is a regular expression for digits)
+  shared_pos <- intersect(get_positions(mutations, "Lys\\d+Glu"),
+                          get_positions(mutations, "Lys\\d+Arg"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Lys", "Gly", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Asn\\d+Asp and Asn\\d+Ser: 
+  shared_pos <- intersect(get_positions(mutations, "Asn\\d+Asp"),
+                          get_positions(mutations, "Asn\\d+Ser"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Asn", "Gly", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Phe\\d+Ser and Phe\\d+Leu
+  shared_pos <- intersect(get_positions(mutations, "Phe\\d+Ser"),
+                          get_positions(mutations, "Phe\\d+Leu"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Phe", "Pro", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Phe mutations and "AAA" in gRNA
+  shared_pos <- get_positions(mutations, "Phe\\d+Phe")
+  if (length(shared_pos) > 0 && str_detect(gRNA, "AAA")) {
+    for (position in shared_pos) {
+      mutations  <- str_c(mutations, "Phe", position, "Pro;")
+      categories <- str_c(categories, "Missense;Missense;Missense;")
+    }
+  }
+  
+  # Check for Leu\\d+Leu and Leu\\d+Ser
+  shared_pos <- intersect(get_positions(mutations, "Leu\\d+Leu"),
+                          get_positions(mutations, "Leu\\d+Ser"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Leu", "Pro", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Deduplication of predictions
+  mut_vec   <- unique(keep(str_split(mutations, ";")[[1]], nzchar))
+  mutations <- str_c(str_c(mut_vec, collapse = ";"), ";")
+  
+  cat_vec    <- keep(str_split(categories, ";")[[1]], nzchar)
+  if (length(cat_vec) > length(mut_vec)) cat_vec <- cat_vec[seq_len(length(mut_vec))]
+  categories <- str_c(str_c(cat_vec, collapse = ";"), ";")
+  
+  return(list(mutations = mutations, categories = categories))
+}
+```
+
+```{r echo = TRUE, comment = FALSE, message = FALSE, warning= FALSE}
+# CBE missed mutations: 
+
+cbe_missed_mutations <- function(mutations, categories, gRNA) {
+  
+  # getting positions
+  get_positions <- function(mutations, pattern) {
+    matches <- str_extract_all(mutations, pattern)[[1]]
+    as.integer(str_extract(matches, "\\d+"))
+  }
+  
+  # add mutations and categories for all shared positions
+  add_mutations <- function(mutations, categories, shared_pos, prefix, suffix, cat_entry) {
+    for (position in shared_pos) {
+      mutations  <- str_c(mutations, prefix, position, suffix, ";")
+      categories <- str_c(categories, cat_entry, ";")
+    }
+    return(list(mutations = mutations, categories = categories))
+  }
+  
+  # Check for Val\\d+Val and Val\\d+Met
+  
+  shared_pos <- intersect(get_positions(mutations, "Val\\d+Val"),
+                          get_positions(mutations, "Val\\d+Met"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Val", "Ile", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Gly\\d+Asp and Gly\\d+Ser
+  shared_pos <- intersect(get_positions(mutations, "Gly\\d+Asp"),
+                          get_positions(mutations, "Gly\\d+Ser"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Gly", "Asn", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Gly\\d+Glu and Gly\\d+Arg
+  shared_pos <- intersect(get_positions(mutations, "Gly\\d+Glu"),
+                          get_positions(mutations, "Gly\\d+Arg"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Gly", "Lys", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Check for Pro\\d+Ser and Pro\\d+Leu
+  shared_pos <- intersect(get_positions(mutations, "Pro\\d+Ser"),
+                          get_positions(mutations, "Pro\\d+Leu"))
+  result     <- add_mutations(mutations, categories, shared_pos, "Pro", "Phe", "Missense")
+  mutations  <- result$mutations
+  categories <- result$categories
+  
+  # Deduplication of predictions
+  mut_vec   <- unique(keep(str_split(mutations, ";")[[1]], nzchar))
+  mutations <- str_c(str_c(mut_vec, collapse = ";"), ";")
+  
+  cat_vec    <- keep(str_split(categories, ";")[[1]], nzchar)
+  if (length(cat_vec) > length(mut_vec)) cat_vec <- cat_vec[seq_len(length(mut_vec))]
+  categories <- str_c(str_c(cat_vec, collapse = ";"), ";")
+  
+  return(list(mutations = mutations, categories = categories))
+}
+
+```
+
+- Here is an example of how to append mutations to a dataframe:
+
+```{r echo = TRUE, comment = FALSE, message =FALSE, warning =FALSE}
+# read an excel file: 
+hcm_abe_igf <- read_excel("p_and_fdr_values/hcm_abe_igf_bottom.xlsx") |> data.table()
+# predicted mutation column : cleaned_mutations
+# mutation_category column : mutation_category
+# gRNA sequence column: sequences column
+
+for(i in 1:nrow(hcm_abe_igf)){
+  result <- abe_missed_mutations(hcm_abe_igf$cleaned_mutations[i],    hcm_abe_igf$mutation_category[i], hcm_abe_igf$gRNAs[i])
+  hcm_abe_igf$cleaned_mutations[i] <- result$mutations
+  hcm_abe_igf$mutation_category[i] <- result$categories
+}
+
+write.xlsx(hcm_abe_igf, "p_and_fdr_values/hcm_abe_igf_appended_mutations.xlsx")
+
+head(hcm_abe_igf) |> gt() |> tab_options(table.font.size = 6)
+```
