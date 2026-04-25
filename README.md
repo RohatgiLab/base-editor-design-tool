@@ -55,7 +55,7 @@ Whether to filter out edits in a GC motif
 **Output name:**  
 Name for output folder  
 
-### Appending Missed Mutations from the Base Editor Design Tool:
+#### Appending Missed Mutations from the Base Editor Design Tool:
 A custom function has been added to account for previously missed mutations. Please refer to the .Rmd file, which includes both the code and an example.
 
 Purpose: Identify and append these missed dual-edit mutations and their categories to the output dataframe.
