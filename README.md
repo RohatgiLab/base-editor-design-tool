@@ -1,4 +1,5 @@
 # Base Editor Design Tool
+[![DOI](https://zenodo.org/badge/1220493613.svg)](https://doi.org/10.5281/zenodo.19957891)
 
 This code designs every possible guide in the CDS region, extending 30 nucleotides into intronic and UTR regions for user-defined transcripts.
 It then annotates the possible edits for each guide. In its original implementation, amino acid change predictions were generated for single base edits; 
